@@ -2,6 +2,8 @@ import os
 from flask import Flask, request, jsonify, abort
 from sqlalchemy import exc
 import json
+from werkzeug.exceptions import HTTPException
+import traceback
 from flask_cors import CORS
 
 from .database.models import db_drop_and_create_all, setup_db, Drink
@@ -9,7 +11,19 @@ from .auth.auth import AuthError, requires_auth
 
 app = Flask(__name__)
 setup_db(app)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+
+@app.after_request
+def after_request(response):
+    response.headers.add(
+        "Access-Control-Allow-Headers", "Content-Type,Authorization,true"
+    )
+    response.headers.add(
+        "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS,PATCH"
+    )
+    return response
+
 
 '''
 @TODO uncomment the following line to initialize the datbase
@@ -17,7 +31,7 @@ CORS(app)
 !! NOTE THIS MUST BE UNCOMMENTED ON FIRST RUN
 !! Running this funciton will add one
 '''
-# db_drop_and_create_all()
+db_drop_and_create_all()
 
 # ROUTES
 '''
@@ -30,6 +44,23 @@ CORS(app)
 '''
 
 
+@app.route('/drinks', methods=['GET'])
+def retrieve_drinks():
+    try:
+        selection = Drink.query.order_by(Drink.id).all()
+
+        return jsonify({
+            'success': True,
+            'drinks': [drink.short() for drink in selection],
+        })
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        traceback.print_exc()
+        print(f"An error occurred: {e}")
+        abort(422)
+
+
 '''
 @TODO implement endpoint
     GET /drinks-detail
@@ -38,6 +69,24 @@ CORS(app)
     returns status code 200 and json {"success": True, "drinks": drinks} where drinks is the list of drinks
         or appropriate status code indicating reason for failure
 '''
+
+
+@app.route('/drinks-detail',  methods=['GET'])
+@requires_auth('get:drinks-detail')
+def retrieve_drinks_detail(payload):
+    try:
+        selection = Drink.query.order_by(Drink.id).all()
+
+        return jsonify({
+            'success': True,
+            'drinks': [drink.long() for drink in selection],
+        })
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        traceback.print_exc()
+        print(f"An error occurred: {e}")
+        abort(422)
 
 
 '''
@@ -49,6 +98,37 @@ CORS(app)
     returns status code 200 and json {"success": True, "drinks": drink} where drink an array containing only the newly created drink
         or appropriate status code indicating reason for failure
 '''
+
+
+@app.route('/drinks', methods=['POST'])
+@requires_auth('post:drinks')
+def create_new_row_in_drink(payload):
+    try:
+        body = request.get_json()
+
+        new_title = body.get('title', None)
+        new_recipe = body.get('recipe', None)
+
+        if new_title is None or new_recipe is None:
+            abort(422)
+
+        drink = Drink(
+            title=new_title,
+            recipe=json.dumps(new_recipe)
+        )
+
+        drink.insert()
+
+        return jsonify({
+            'success': True,
+            'drinks': [drink.long()],
+        })
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        traceback.print_exc()
+        print(f"An error occurred: {e}")
+        abort(422)
 
 
 '''
@@ -64,6 +144,39 @@ CORS(app)
 '''
 
 
+@app.route('/drinks/<int:id>', methods=['PATCH'])
+@requires_auth('patch:drinks')
+def update_drink(payload, id):
+    try:
+        body = request.get_json()
+
+        new_title = body.get('title', None)
+        new_recipe = body.get('recipe', None)
+
+        drink = Drink.query.filter_by(id=id).one_or_none()
+
+        if drink is None:
+            raise (404)
+
+        if new_title:
+            drink.title = new_title
+        if new_recipe:
+            drink.recipe = json.dumps(new_recipe)
+
+        drink.update()
+
+        return jsonify({
+            'success': True,
+            'drinks': [drink.long()],
+        })
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        traceback.print_exc()
+        print(f"An error occurred: {e}")
+        abort(422)
+
+
 '''
 @TODO implement endpoint
     DELETE /drinks/<id>
@@ -74,6 +187,29 @@ CORS(app)
     returns status code 200 and json {"success": True, "delete": id} where id is the id of the deleted record
         or appropriate status code indicating reason for failure
 '''
+
+
+@app.route('/drinks/<int:id>', methods=['DELETE'])
+@requires_auth('delete:drinks')
+def delete_drink(payload, id):
+    try:
+        drink = Drink.query.filter(Drink.id == id).one_or_none()
+
+        if drink is None:
+            abort(404)
+
+        drink.delete()
+
+        return jsonify({
+            'success': True,
+            'deleted': id
+        })
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        traceback.print_exc()
+        print(f"An error occurred: {e}")
+        abort(422)
 
 
 # Error Handling
@@ -108,7 +244,25 @@ def unprocessable(error):
 '''
 
 
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        'success': False,
+        'error': 404,
+        'message': 'resource not found'
+    }), 404
+
+
 '''
 @TODO implement error handler for AuthError
     error handler should conform to general task above
 '''
+
+
+@app.errorhandler(AuthError)
+def auth_error(error):
+    return jsonify({
+        'success': False,
+        'error': error.status_code,
+        'message': error.error['code'],
+    }), error.status_code

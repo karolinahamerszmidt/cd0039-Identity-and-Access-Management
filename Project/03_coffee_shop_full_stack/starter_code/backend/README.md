@@ -85,3 +85,14 @@ There are `@TODO` comments throughout the `./backend/src`. We recommend tackling
 
 1. `./src/auth/auth.py`
 2. `./src/api.py`
+
+### Random notes
+
+Useful conda commands:
+
+```
+conda create --name coffe-shop-3-8 python=3.8
+conda activate coffe-shop-3-8
+conda deactivate
+```
+
